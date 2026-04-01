@@ -1,6 +1,8 @@
 import BasePowerRollEffect from "./base-power-roll-effect.mjs";
 import DrawSteelActiveEffect from "../../../documents/active-effect.mjs";
+import DrawSteelChatMessage from "../../../documents/chat-message.mjs";
 import { setOptions } from "../../helpers.mjs";
+import { decodePayload, encodePayload, escapeHtml, partitionTokensByOwnership, registerGMButtonHook } from "../../../utils/gm-action.mjs";
 
 /**
  * @import { ActiveEffectData } from "@common/documents/_types.mjs";
@@ -175,16 +177,18 @@ export default class AppliedPowerRollEffect extends BasePowerRollEffect {
   /* -------------------------------------------------- */
 
   /**
-   * Apply an effect to one or more actors.
+   * Apply an effect to targeted actors, whispering the GM for unowned tokens.
    * @param {string} tierKey    The tier of effect to apply.
    * @param {string} effectId   A status effect or AE id.
-   * @param {object} [options]
-   * @param {Iterable<DrawSteelActor>} [options.targets] Defaults to all selected actors.
-   * @returns {Promise<DrawSteelActiveEffect[][]>} The batched operation of created effects.
    */
-  async applyEffect(tierKey, effectId, options = {}) {
-    if (Array.from(options.targets ?? []).some(a => !a.isOwner)) {
-      throw new Error(`${game.user.name} is not an owner of all the actors`);
+  async applyEffect(tierKey, effectId) {
+    if (!game.user?.targets?.size) {
+      return void ui.notifications.error("DRAW_STEEL.UI.NoTokenTargeted", { localize: true });
+    }
+
+    const targetTokens = [...game.user.targets].filter((token) => token?.document && token.actor);
+    if (!targetTokens.length) {
+      return void ui.notifications.error("DRAW_STEEL.UI.NoTokenTargeted", { localize: true });
     }
 
     const config = this.applied[tierKey].effects[effectId];
@@ -207,7 +211,15 @@ export default class AppliedPowerRollEffect extends BasePowerRollEffect {
     // can't updateSource => toObject due to `origin` field triggering a warning when it checks for relative uuid
     const createData = foundry.utils.mergeObject(tempEffect.toObject(), updates);
 
-    const targetActors = options.targets ?? ds.utils.tokensToActors();
+    const { controllable, restricted } = partitionTokensByOwnership(targetTokens, game.user);
+
+    const ownedActors = new Map();
+    for (const token of controllable) {
+      const actor = token.actor;
+      if (!actor) continue;
+      const key = actor.uuid ?? actor.id ?? actor._id ?? token.id;
+      if (!ownedActors.has(key)) ownedActors.set(key, actor);
+    }
 
     // Need separate operations because all deletions must be done before creations to avoid id collisions
     /** @type {DatabaseWriteOperation[]} */
@@ -215,16 +227,27 @@ export default class AppliedPowerRollEffect extends BasePowerRollEffect {
     /** @type {DatabaseWriteOperation[]} */
     const toCreate = [];
 
-    for (const actor of targetActors) {
-      // reusing the ID will block creation if it's already on the actor
+    for (const actor of ownedActors.values()) {
+      // reusing the ID will block creation if it is already on the actor
       const existing = actor.effects.get(tempEffect.id);
       // deleting instead of updating because there may be variances between the old copy and new
       if (existing) toDelete.push({ action: "delete", parent: actor, documentName: "ActiveEffect", ids: [tempEffect.id] });
-      toCreate.push({ action: "create", parent: actor, documentName: "ActiveEffect", data: [createData], keepId: noStack });
+      toCreate.push({ action: "create", parent: actor, documentName: "ActiveEffect", data: [foundry.utils.duplicate(createData)], keepId: noStack });
     }
 
     await foundry.documents.modifyBatch(toDelete);
-    return foundry.documents.modifyBatch(toCreate);
+    await foundry.documents.modifyBatch(toCreate);
+
+    for (const token of restricted) {
+      await AppliedPowerRollEffect._whisperGMApplyButton({
+        sceneId: token.document.parent?.id ?? token.scene?.id,
+        tokenId: token.id,
+        tokenName: token.name,
+        effectName: tempEffect.name ?? effectId,
+        effectData: foundry.utils.duplicate(createData),
+        keepId: noStack,
+      });
+    }
   }
 
   /* -------------------------------------------------- */
@@ -239,3 +262,44 @@ export default class AppliedPowerRollEffect extends BasePowerRollEffect {
     return this.item.effects.get(key) || CONFIG.statusEffects.find(s => key === s.id) || { name: key };
   }
 }
+
+/* -------------------------------------------------- */
+
+registerGMButtonHook(".ds-apply-effect-gm", async (btn) => {
+  try {
+    if (!game.user.isGM) {
+      return ui.notifications.warn("DRAW_STEEL.UI.GMOnly", { localize: true });
+    }
+    const encoded = btn.dataset.ds;
+    if (!encoded) return;
+
+    const data = decodePayload(encoded);
+    const scene = game.scenes.get(data.sceneId) ?? canvas?.scene;
+    const tokenDoc = scene?.tokens?.get(data.tokenId) ?? canvas?.tokens?.get(data.tokenId)?.document;
+    if (!tokenDoc) {
+      return ui.notifications.error("DRAW_STEEL.UI.TokenNotFound", { localize: true });
+    }
+
+    const actor = tokenDoc.actor;
+    if (!actor) {
+      return ui.notifications.error("DRAW_STEEL.UI.ActorNotFound", { localize: true });
+    }
+
+    const effectData = data.effectData;
+    if (!effectData) {
+      return ui.notifications.error("DRAW_STEEL.UI.EffectNotFound", { localize: true });
+    }
+
+    // Mirrors the owner path: delete any existing copy before re-creating so keepId works correctly.
+    const existing = actor.effects.get(effectData._id);
+    if (existing) await existing.delete();
+
+    await actor.createEmbeddedDocuments("ActiveEffect", [effectData], { keepId: Boolean(data.keepId) });
+
+    btn.disabled = true;
+    btn.textContent = _loc("DRAW_STEEL.UI.Applied");
+  } catch (err) {
+    console.error(err);
+    ui.notifications.error("DRAW_STEEL.UI.ApplyFailed", { localize: true });
+  }
+});

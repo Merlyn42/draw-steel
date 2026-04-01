@@ -1963,7 +1963,8 @@
       "Prompt": "Roll {prompt}",
       "Button": "Roll",
       "Damage": {
-        "NoTokenSelected": "You must have at least one token selected."
+        "NoTokenSelected": "You must have at least one token selected.",
+        "NoTokenTargeted": "You must target at least one token."
       },
       "Power": {
         "Prompt": {
@@ -2360,6 +2361,24 @@
         "Strong": "Strong Potency"
       },
       "Chr": "Highest Characteristic"
+    },
+    "UI": {
+      "ApplyDamage": "Apply Damage",
+      "ApplyEffect": "Apply Effect",
+      "ApplyFailed": "Failed to apply.",
+      "ApplyHeal": "Apply Heal",
+      "ApplyTempHeal": "Apply Temporary Heal",
+      "Applied": "Applied",
+      "ChangeTypeDamage": "Damage",
+      "ChangeTypeHeal": "Heal",
+      "ChangeTypeTempHeal": "Temp Heal",
+      "EffectLabel": "Effect",
+      "EffectNotFound": "Effect not found.",
+      "GMOnly": "GM only.",
+      "NoTokenTargeted": "You must target at least one token.",
+      "RequestGMApplyLine": "Permission request for token:",
+      "TokenNotFound": "Token not found.",
+      "ActorNotFound": "Actor not available for token."
     }
   },
   "TYPES": {

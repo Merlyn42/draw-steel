@@ -180,7 +180,7 @@
       "thumbnail": "systems/draw-steel/assets/system-background.webp"
     }
   ],
-  "version": "1.0.0",
+  "version": "1.0.0M",
   "compatibility": {
     "minimum": "14.360",
     "verified": "14",
@@ -273,7 +273,7 @@
     }
   ],
   "socket": true,
-  "manifest": "https://github.com/MetaMorphic-Digital/draw-steel/releases/latest/download/system.json",
+  "manifest": "https://github.com/Merlyn42/draw-steel/releases/latest/download/system.json",
   "download": "",
   "background": "systems/draw-steel/assets/system-background.webp",
   "grid": {
